@@ -11,5 +11,9 @@ class OTPVerify(BaseModel):
 class Admin(BaseModel):
     name: str
     email: EmailStr
-    password: str
+    profile_picture: Optional[HttpUrl] = None
+
+
+class AdminUpdate(BaseModel):
+    name: Optional[str] = None
     profile_picture: Optional[HttpUrl] = None

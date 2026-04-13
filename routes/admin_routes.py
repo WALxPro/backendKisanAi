@@ -1,6 +1,5 @@
 from fastapi import APIRouter, HTTPException
-from models.admin_models import EmailVerify,OTPVerify, Admin
-from passlib.context import CryptContext
+from models.admin_models import EmailVerify, OTPVerify, Admin, AdminUpdate
 from datetime import datetime, timedelta
 from email.message import EmailMessage
 from dotenv import load_dotenv
@@ -9,10 +8,8 @@ import smtplib
 import os
 import random
 
-
 load_dotenv()
 router = APIRouter()
-pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def send_email(to_email: str, subject: str, body: str):
     msg = EmailMessage()
@@ -66,35 +63,68 @@ async def verify_otp(data: OTPVerify):
     )
     return {"message": "OTP verified successfully"}
 
-
 @router.post("/signup")
 async def signup(data: Admin):
     existing_user = await db.admins.find_one({"email": data.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
+
     otp_record = await db.otps.find_one({"email": data.email})
     if not otp_record or not otp_record.get("verified", False):
         raise HTTPException(status_code=400, detail="Email not verified")
-    hashed_password = pwd_context.hash(data.password[:72])
+
     new_admin = {
         "name": data.name,
         "email": data.email,
-        "password": hashed_password,
         "profile_picture": str(data.profile_picture) if data.profile_picture else None,
         "isEmailVerified": True
     }
+
     await db.admins.insert_one(new_admin)
     await db.otps.delete_one({"email": data.email})
-    return {"message": "Account created successfully"}
 
+    return {"message": "Account created successfully"}
 @router.get("/login/{email}")
 async def login(email: str):
-    print("Received email:", email)
     user = await db.admins.find_one({"email": email})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
     user["_id"] = str(user["_id"])
+
     return {
         "message": "Login success",
         "user": user
+    }
+
+@router.put("/update/{email}")
+async def update_admin(email: str, data: AdminUpdate):
+    existing_admin = await db.admins.find_one({"email": email})
+    if not existing_admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+
+    update_data = {k: v for k, v in data.dict().items() if v is not None}
+
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No data provided")
+
+    # ❌ prevent email change
+    if "email" in update_data:
+        raise HTTPException(status_code=400, detail="Email cannot be updated")
+
+    # 🖼 profile picture
+    if "profile_picture" in update_data:
+        update_data["profile_picture"] = str(update_data["profile_picture"])
+
+    await db.admins.update_one(
+        {"email": email},
+        {"$set": update_data}
+    )
+
+    updated_admin = await db.admins.find_one({"email": email})
+    updated_admin["_id"] = str(updated_admin["_id"])
+
+    return {
+        "message": "Admin updated successfully",
+        "admin": updated_admin
     }
