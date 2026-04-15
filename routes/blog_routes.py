@@ -59,3 +59,13 @@ async def delete_blog(blog_id: str):
         raise HTTPException(status_code=404, detail="Blog not found")
 
     return {"message": "Blog deleted successfully"}
+
+@router.get("/single/{blog_id}")
+async def get_single_blog(blog_id: str):
+    blog = await blogs_collection.find_one({"_id": ObjectId(blog_id)})
+
+    if not blog:
+        raise HTTPException(status_code=404, detail="Blog not found")
+
+    blog["_id"] = str(blog["_id"])
+    return blog

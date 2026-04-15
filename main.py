@@ -1,4 +1,4 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from routes.admin_routes import router as admin_router
 from routes.farmer_routes import router as farmer_router
 from routes.ads_routes import router as ads_router

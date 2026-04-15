@@ -8,9 +8,18 @@ import re
 import numpy as np
 import requests
 import tensorflow as tf
+import base64
+import io
+from PIL import Image
 
 
 router = APIRouter()
+def decode_base64_image(base64_str: str):
+    image_bytes = base64.b64decode(base64_str)
+    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    image = image.resize((256, 256))
+    image = np.array(image) / 255.0
+    return np.expand_dims(image, axis=0)
 
 MODEL_PATH = Path(__file__).resolve().parents[1] / "cnn_model" / "cnn_model.h5"
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
