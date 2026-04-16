@@ -67,5 +67,8 @@ async def get_single_blog(blog_id: str):
     if not blog:
         raise HTTPException(status_code=404, detail="Blog not found")
 
+    if "created_at" in blog and isinstance(blog["created_at"], datetime):
+        blog["created_at"] = blog["created_at"].strftime("%d %b %Y")
+
     blog["_id"] = str(blog["_id"])
     return blog
