@@ -14,3 +14,4 @@ jupyterlab
 scipy
 email-validator
 passlib
+langchain-google-genai

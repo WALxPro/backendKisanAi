@@ -6,48 +6,35 @@ import os
 from pathlib import Path
 import re
 import numpy as np
-import requests
 import tensorflow as tf
-import base64
-import io
-from PIL import Image
+from dotenv import load_dotenv
+from langchain_google_genai import ChatGoogleGenerativeAI
 
+load_dotenv()
 
 router = APIRouter()
-def decode_base64_image(base64_str: str):
-    image_bytes = base64.b64decode(base64_str)
-    image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    image = image.resize((256, 256))
-    image = np.array(image) / 255.0
-    return np.expand_dims(image, axis=0)
 
-MODEL_PATH = Path(__file__).resolve().parents[1] / "cnn_model" / "cnn_model.h5"
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-GEMINI_ENDPOINT = (
-    f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-)
-CLASS_NAMES = [
-    "Corn___Common_Rust",
-    "Corn___Gray_Leaf_Spot",
-    "Corn___Healthy",
-    "Corn___Northern_Leaf_Blight",
-    "Potato___Early_Blight",
-    "Potato___Healthy",
-    "Potato___Late_Blight",
-    "Rice___Brown_Spot",
-    "Rice___Healthy",
-    "Rice___Leaf_Blast",
-    "Rice___Neck_Blast",
-    "Sugarcane__BacterialBlight",
-    "Sugarcane__Healthy",
-    "Sugarcane__RedRot",
-    "Wheat___Brown_Rust",
-    "Wheat___Healthy",
-    "Wheat___Yellow_Rust",
-]
+MODEL_PATH = Path(__file__).resolve().parents[1] / "cnn_model" / "cnn_model_2.h5"
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-lite")
+CLASS_INDICES_PATH = Path(__file__).resolve().parents[1] / "cnn_model" / "class_indices.json"
+
+with open(CLASS_INDICES_PATH, "r") as f:
+    class_indices = json.load(f)
+
+# Reverse mapping
+CLASS_NAMES = {v: k for k, v in class_indices.items()}
 
 DISEASE_DETAILS_CACHE: dict[str, dict[str, str]] = {}
+GEMINI_LLM = (
+    ChatGoogleGenerativeAI(
+        model=GEMINI_MODEL,
+        google_api_key=GEMINI_API_KEY,
+        temperature=0.2,
+    )
+    if GEMINI_API_KEY
+    else None
+)
 
 
 def _load_model():
@@ -62,7 +49,15 @@ MODEL = _load_model()
 def _format_label(label: str) -> str:
     text = label.replace("___", " ").replace("__", " ").replace("_", " ")
     text = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
+    words = re.sub(r"\s+", " ", text).strip().split(" ")
+
+    # Some labels come as "Rice Rice Neck Blast"; collapse repeated adjacent words.
+    deduped_words = []
+    for word in words:
+        if not deduped_words or deduped_words[-1].lower() != word.lower():
+            deduped_words.append(word)
+
+    return " ".join(deduped_words)
 
 
 def _preprocess_image(image_bytes: bytes) -> np.ndarray:
@@ -75,10 +70,14 @@ def _preprocess_image(image_bytes: bytes) -> np.ndarray:
 def _build_disease_prompt(disease_name: str) -> str:
     readable_name = _format_label(disease_name)
     return (
-        "You are helping a farmer. Explain the plant disease in simple, practical language. "
-        "Return ONLY valid JSON with these keys: disease_name, description, symptoms, causes, prevention, treatment, urgency. "
-        "Use short, clear sentences. If the class is healthy, explain that the plant appears healthy and mention general monitoring advice. "
-        f"Disease class: {disease_name}. Readable name: {readable_name}."
+        "You are an agriculture assistant for small farmers. "
+        "The farmer may not be highly literate, so use very easy words and very short sentences. "
+        "Avoid technical terms. Be practical and kind. "
+        "Return ONLY valid JSON with these exact keys: "
+        "disease_name, simple_description, what_farmer_should_do_now, prevention_tips, when_to_seek_expert_help. "
+        "Each key should have plain text. Keep the full response under 120 words. "
+        "If the plant appears healthy, clearly say it looks healthy and give only basic care tips. "
+        f"Detected disease name: {readable_name}."
     )
 
 
@@ -90,30 +89,43 @@ def _parse_gemini_text(response_text: str) -> dict[str, object]:
             cleaned_text = cleaned_text[4:]
         cleaned_text = cleaned_text.strip()
 
-    return json.loads(cleaned_text)
-
-
-def _fallback_disease_details(disease_name: str) -> dict[str, object]:
-    readable_name = _format_label(disease_name)
-    if "Healthy" in disease_name:
+    try:
+        return json.loads(cleaned_text)
+    except json.JSONDecodeError:
+        # If Gemini returns plain text, still provide a usable structure.
         return {
-            "disease_name": readable_name,
-            "description": "The model detected a healthy plant leaf with no obvious disease symptoms.",
-            "symptoms": ["No obvious spots, blight, or rust visible."],
-            "causes": ["Normal plant condition"],
-            "prevention": ["Keep monitoring leaves regularly", "Maintain proper irrigation and nutrition"],
-            "treatment": ["No treatment needed right now", "Continue routine crop care"],
-            "urgency": "low",
+            "disease_name": "",
+            "simple_description": cleaned_text,
+            "what_farmer_should_do_now": "",
+            "prevention_tips": "",
+            "when_to_seek_expert_help": "",
         }
 
+
+def _is_valid_gemini_key(api_key: str | None) -> bool:
+    if not api_key:
+        return False
+
+    normalized = api_key.strip()
+    if not normalized:
+        return False
+
+    # Guard against placeholder values in .env like GEMINI_API_KEY=GEMINI_API_KEY
+    if normalized.lower() in {"gemini_api_key", "google_api_key", "your_api_key"}:
+        return False
+
+    return True
+
+
+def _gemini_unavailable_response(disease_name: str) -> dict[str, object]:
+    readable_name = _format_label(disease_name)
     return {
         "disease_name": readable_name,
-        "description": f"{readable_name} is a crop disease that can reduce plant health and yield if not managed early.",
-        "symptoms": ["Visible leaf spots, discoloration, or tissue damage may appear."],
-        "causes": ["Fungal, bacterial, or environmental stress depending on the crop."],
-        "prevention": ["Remove infected leaves", "Avoid overhead watering", "Keep field hygiene"],
-        "treatment": ["Apply a crop-appropriate treatment recommended by an agronomist", "Monitor the plant closely"],
-        "urgency": "medium",
+        "simple_description": "Disease explanation is not available right now.",
+        "what_farmer_should_do_now": "Please try again after configuring a valid Gemini API key.",
+        "prevention_tips": "",
+        "when_to_seek_expert_help": "",
+        "source": "unavailable",
     }
 
 
@@ -121,47 +133,32 @@ def _get_disease_details(disease_name: str) -> dict[str, object]:
     if disease_name in DISEASE_DETAILS_CACHE:
         return DISEASE_DETAILS_CACHE[disease_name]
 
-    fallback_details = _fallback_disease_details(disease_name)
-
-    if not GEMINI_API_KEY:
-        DISEASE_DETAILS_CACHE[disease_name] = fallback_details
-        return fallback_details
+    if not _is_valid_gemini_key(GEMINI_API_KEY):
+        unavailable = _gemini_unavailable_response(disease_name)
+        DISEASE_DETAILS_CACHE[disease_name] = unavailable
+        return unavailable
 
     try:
-        response = requests.post(
-            GEMINI_ENDPOINT,
-            params={"key": GEMINI_API_KEY},
-            headers={"Content-Type": "application/json"},
-            json={
-                "contents": [
-                    {
-                        "role": "user",
-                        "parts": [{"text": _build_disease_prompt(disease_name)}],
-                    }
-                ],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 500,
-                },
-            },
-            timeout=30,
-        )
-        response.raise_for_status()
-        payload = response.json()
-        candidates = payload.get("candidates", [])
-        if not candidates:
-            raise ValueError("Gemini returned no candidates")
+        if GEMINI_LLM is None:
+            raise ValueError("Gemini LLM is not configured")
 
-        content = candidates[0].get("content", {})
-        parts = content.get("parts", [])
-        text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+        llm_response = GEMINI_LLM.invoke(_build_disease_prompt(disease_name))
+        text = llm_response.content if hasattr(llm_response, "content") else str(llm_response)
         parsed = _parse_gemini_text(text)
-        result = {**fallback_details, **parsed}
+        result = {
+            "disease_name": parsed.get("disease_name") or _format_label(disease_name),
+            "simple_description": parsed.get("simple_description") or "",
+            "what_farmer_should_do_now": parsed.get("what_farmer_should_do_now") or "",
+            "prevention_tips": parsed.get("prevention_tips") or "",
+            "when_to_seek_expert_help": parsed.get("when_to_seek_expert_help") or "",
+            "source": "gemini",
+        }
         DISEASE_DETAILS_CACHE[disease_name] = result
         return result
     except Exception:
-        DISEASE_DETAILS_CACHE[disease_name] = fallback_details
-        return fallback_details
+        unavailable = _gemini_unavailable_response(disease_name)
+        DISEASE_DETAILS_CACHE[disease_name] = unavailable
+        return unavailable
 
 
 @router.post("/predict")
