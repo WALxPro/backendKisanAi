@@ -25,7 +25,7 @@ with open(CLASS_INDICES_PATH, "r") as f:
 # Reverse mapping
 CLASS_NAMES = {v: k for k, v in class_indices.items()}
 
-DISEASE_DETAILS_CACHE: dict[str, dict[str, str]] = {}
+DISEASE_DETAILS_CACHE: dict[str, dict[str, object]] = {}
 GEMINI_LLM = (
     ChatGoogleGenerativeAI(
         model=GEMINI_MODEL,
@@ -67,6 +67,32 @@ def _preprocess_image(image_bytes: bytes) -> np.ndarray:
     return np.expand_dims(image_tensor.numpy(), axis=0)
 
 
+def predict_with_rejection(
+    model: tf.keras.Model,
+    image_array: np.ndarray,
+    class_names: list[str],
+    threshold: float = 0.70,
+) -> dict[str, object]:
+    probabilities = model.predict(image_array, verbose=0)[0]
+    top_index = int(np.argmax(probabilities))
+    top_confidence = float(probabilities[top_index])
+
+    if top_confidence < threshold:
+        return {
+            "status": "invalid",
+            "message": "Invalid image! Please upload a crop image of corn, wheat, rice, sugarcane, or potato only.",
+            "class": None,
+            "confidence": None,
+        }
+
+    return {
+        "status": "valid",
+        "message": "Prediction completed successfully.",
+        "class": class_names[top_index],
+        "confidence": top_confidence,
+    }
+
+
 def _build_disease_prompt(disease_name: str) -> str:
     readable_name = _format_label(disease_name)
     return (
@@ -74,8 +100,10 @@ def _build_disease_prompt(disease_name: str) -> str:
         "The farmer may not be highly literate, so use very easy words and very short sentences. "
         "Avoid technical terms. Be practical and kind. "
         "Return ONLY valid JSON with these exact keys: "
-        "disease_name, simple_description, what_farmer_should_do_now, prevention_tips, when_to_seek_expert_help. "
-        "Each key should have plain text. Keep the full response under 120 words. "
+        "disease_name, crop_name, disease_status, description, symptoms, causes, prevention, treatment, immediate_actions, when_to_seek_expert_help, spread_risk, confidence_note. "
+        "description, causes, spread_risk, confidence_note, when_to_seek_expert_help should be short plain text. "
+        "symptoms, prevention, treatment, immediate_actions should be arrays with 3 to 5 short bullet-like strings each. "
+        "Keep the response practical and concise. "
         "If the plant appears healthy, clearly say it looks healthy and give only basic care tips. "
         f"Detected disease name: {readable_name}."
     )
@@ -95,11 +123,26 @@ def _parse_gemini_text(response_text: str) -> dict[str, object]:
         # If Gemini returns plain text, still provide a usable structure.
         return {
             "disease_name": "",
-            "simple_description": cleaned_text,
-            "what_farmer_should_do_now": "",
-            "prevention_tips": "",
+            "crop_name": "",
+            "disease_status": "unknown",
+            "description": cleaned_text,
+            "symptoms": [],
+            "causes": "",
+            "prevention": [],
+            "treatment": [],
+            "immediate_actions": [],
             "when_to_seek_expert_help": "",
+            "spread_risk": "",
+            "confidence_note": "",
         }
+
+
+def _as_text_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str):
+        return [value.strip()] if value.strip() else []
+    return []
 
 
 def _is_valid_gemini_key(api_key: str | None) -> bool:
@@ -121,10 +164,21 @@ def _gemini_unavailable_response(disease_name: str) -> dict[str, object]:
     readable_name = _format_label(disease_name)
     return {
         "disease_name": readable_name,
-        "simple_description": "Disease explanation is not available right now.",
+        "crop_name": readable_name.split(" ")[0] if readable_name else "",
+        "disease_status": "unknown",
+        "description": "Detailed disease explanation is not available right now.",
+        "symptoms": [],
+        "causes": "",
+        "prevention": [],
+        "treatment": [],
+        "immediate_actions": ["Please try again after configuring a valid Gemini API key."],
+        "when_to_seek_expert_help": "If symptoms spread quickly, contact an agriculture expert.",
+        "spread_risk": "Unknown",
+        "confidence_note": "AI details unavailable.",
+        # Backward-compatible fields.
+        "simple_description": "Detailed disease explanation is not available right now.",
         "what_farmer_should_do_now": "Please try again after configuring a valid Gemini API key.",
         "prevention_tips": "",
-        "when_to_seek_expert_help": "",
         "source": "unavailable",
     }
 
@@ -145,12 +199,28 @@ def _get_disease_details(disease_name: str) -> dict[str, object]:
         llm_response = GEMINI_LLM.invoke(_build_disease_prompt(disease_name))
         text = llm_response.content if hasattr(llm_response, "content") else str(llm_response)
         parsed = _parse_gemini_text(text)
+        description = str(parsed.get("description") or parsed.get("simple_description") or "")
+        immediate_actions = _as_text_list(
+            parsed.get("immediate_actions") or parsed.get("what_farmer_should_do_now")
+        )
+        prevention = _as_text_list(parsed.get("prevention") or parsed.get("prevention_tips"))
         result = {
             "disease_name": parsed.get("disease_name") or _format_label(disease_name),
-            "simple_description": parsed.get("simple_description") or "",
-            "what_farmer_should_do_now": parsed.get("what_farmer_should_do_now") or "",
-            "prevention_tips": parsed.get("prevention_tips") or "",
-            "when_to_seek_expert_help": parsed.get("when_to_seek_expert_help") or "",
+            "crop_name": parsed.get("crop_name") or _format_label(disease_name).split(" ")[0],
+            "disease_status": parsed.get("disease_status") or "infected",
+            "description": description,
+            "symptoms": _as_text_list(parsed.get("symptoms")),
+            "causes": str(parsed.get("causes") or ""),
+            "prevention": prevention,
+            "treatment": _as_text_list(parsed.get("treatment")),
+            "immediate_actions": immediate_actions,
+            "when_to_seek_expert_help": str(parsed.get("when_to_seek_expert_help") or ""),
+            "spread_risk": str(parsed.get("spread_risk") or ""),
+            "confidence_note": str(parsed.get("confidence_note") or ""),
+            # Backward-compatible fields.
+            "simple_description": description,
+            "what_farmer_should_do_now": " ".join(immediate_actions),
+            "prevention_tips": " ".join(prevention),
             "source": "gemini",
         }
         DISEASE_DETAILS_CACHE[disease_name] = result
@@ -174,10 +244,23 @@ async def predict_disease(
         image_bytes = await image.read()
         image_array = _preprocess_image(image_bytes)
 
+        class_names = [CLASS_NAMES[index] for index in sorted(CLASS_NAMES.keys())]
+        prediction_result = predict_with_rejection(
+            model=MODEL,
+            image_array=image_array,
+            class_names=class_names,
+        )
+
+        if prediction_result["status"] == "invalid":
+            return {
+                "message": prediction_result["message"],
+                "prediction": prediction_result,
+                "database_updated": False,
+            }
+
         probabilities = MODEL.predict(image_array, verbose=0)[0]
-        top_index = int(np.argmax(probabilities))
-        top_class = CLASS_NAMES[top_index]
-        top_confidence = float(probabilities[top_index])
+        top_class = str(prediction_result["class"])
+        top_confidence = float(prediction_result["confidence"])
 
         ranked_predictions = []
         for index in np.argsort(probabilities)[::-1][:3]:
