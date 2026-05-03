@@ -50,7 +50,8 @@ def _build_disease_chat_system_prompt(disease_name: str, disease_details: dict) 
     prevention = ", ".join(disease_details.get("prevention", []))
     
     return (
-        f"You are an agriculture expert assistant helping farmers understand diseases. "
+        f"You are an agriculture expert assistant helping farmers understand plant diseases. "
+        f"Your ONLY purpose is to answer questions related to plant diseases and agricultural health. "
         f"The farmer has detected a disease: {readable_name}. "
         f"Provide helpful, simple, and practical advice. Use easy words and short sentences. "
         f"Avoid technical terms. Be kind and supportive. "
@@ -58,7 +59,9 @@ def _build_disease_chat_system_prompt(disease_name: str, disease_details: dict) 
         f"Symptoms: {symptoms}. "
         f"Treatment: {treatment}. "
         f"Prevention: {prevention}. "
-        f"Answer the farmer's question based on this disease information."
+        f"IMPORTANT: Only answer questions related to this disease or plant diseases in general. "
+        f"If the farmer asks questions outside of plant diseases (like general knowledge, politics, sports, weather, personal advice, etc.), "
+        f"respond ONLY with: 'I can only provide assistance related to plant diseases. Please ask me questions about {readable_name} or other plant diseases.'"
     )
 
 
