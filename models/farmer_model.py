@@ -9,20 +9,17 @@ class OTPVerify(BaseModel):
     email: EmailStr
     otp: str
 
-
 class CropDetail(BaseModel):
     cropName: str
     season: str
     irrigationType: str
     city: str
 
-
 class Farmer(BaseModel):
     fullname: str
     phone: str
     email: EmailStr
-    password: str
-    isBlocked: bool = False   # 👈 FIXED
+    isBlocked: bool = False
     profilePicture: Optional[HttpUrl] = None
     cropDetail: Optional[CropDetail] = None
     type: str = "farmer"
@@ -33,5 +30,4 @@ class UpdateFarmer(BaseModel):
     fullname: Optional[str] = None
     phone: Optional[str] = None
     profilePicture: Optional[HttpUrl] = None
-    isBlocked : Optional[bool] = None
-
+    isBlocked: Optional[bool] = None

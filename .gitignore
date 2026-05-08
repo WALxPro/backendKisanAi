@@ -4,4 +4,4 @@ __pycache__/
 *.pyo
 *.pyd
 venv/
-firebase-key.json
+serviceAccountKey.json
