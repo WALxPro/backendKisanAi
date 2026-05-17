@@ -11,6 +11,7 @@ class DiseaseMessage(BaseModel):
 
 class DiseaseChatRequest(BaseModel):
     prediction_id: str = Field(..., description="Disease prediction ID from /disease/predict")
+    farmer_id: str = Field(..., description="Unique farmer ID")
     user_message: str = Field(..., min_length=1, description="User's question about the disease")
     
     @validator('user_message')
@@ -23,7 +24,7 @@ class DiseaseChatRequest(BaseModel):
 
 class DiseaseChatCreate(BaseModel):
     prediction_id: str
-    farmer_id: Optional[str] = None
+    farmer_id: str
     disease_name: str
     messages: List[DiseaseMessage] = Field(default_factory=list)
     chat_count: int = 0  # Number of times user has chatted (max 3)

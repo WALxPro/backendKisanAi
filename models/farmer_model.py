@@ -18,6 +18,7 @@ class CropDetail(BaseModel):
 
 
 class Farmer(BaseModel):
+    farmer_id: Optional[str] = None
     fullname: str
     phone: str
     email: EmailStr

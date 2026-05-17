@@ -9,6 +9,8 @@ import smtplib
 import os
 import random
 
+from utils.farmer_identity import generate_farmer_id
+
 
 
 
@@ -99,8 +101,10 @@ async def farmer_signup(data: Farmer):
         raise HTTPException(status_code=400, detail="Email already registered")
 
     hashed_password = pwd_context.hash(data.password[:72])
+    farmer_id = data.farmer_id or generate_farmer_id()
 
     new_farmer = {
+        "farmer_id": farmer_id,
         "fullname": data.fullname,  
         "email": data.email,
         "phone": data.phone,
@@ -119,7 +123,8 @@ async def farmer_signup(data: Farmer):
 
     return {
         "message": "Farmer account created successfully",
-        "id": str(result.inserted_id)
+        "id": str(result.inserted_id),
+        "farmer_id": farmer_id
     }
 @router.get("/login/{email}")
 async def login(email: str):
