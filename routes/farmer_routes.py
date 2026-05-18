@@ -9,13 +9,9 @@ import smtplib
 import os
 import random
 
-<<<<<<< HEAD
 from utils.farmer_identity import generate_farmer_id
 
-=======
 from dependencies import get_current_user  # ← yeh add karo
->>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
-
 
 
 load_dotenv()
