@@ -92,17 +92,14 @@ async def farmer_signup(data: Farmer):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-<<<<<<< HEAD
+
     hashed_password = pwd_context.hash(data.password[:72])
     farmer_id = data.farmer_id or generate_farmer_id()
 
+ 
     new_farmer = {
         "farmer_id": farmer_id,
-        "fullname": data.fullname,  
-=======
-    new_farmer = {
         "fullname": data.fullname,
->>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
         "email": data.email,
         "phone": data.phone,
         "profilePicture": str(data.profilePicture) if data.profilePicture else None,
@@ -116,15 +113,12 @@ async def farmer_signup(data: Farmer):
     result = await db.farmers.insert_one(new_farmer)
 
     return {
-<<<<<<< HEAD
         "message": "Farmer account created successfully",
         "id": str(result.inserted_id),
         "farmer_id": farmer_id
-=======
-        "message": "Farmer created successfully",
-        "id": str(result.inserted_id)
->>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
     }
+
+    
 @router.post("/login")
 async def login(user=Depends(get_current_user)):
     email = user["email"]  # token se aata hai, URL se nahi
