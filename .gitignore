@@ -5,3 +5,5 @@ __pycache__/
 *.pyd
 venv/
 serviceAccountKey.json
+/cnn_model
+/cnn_model.zip
