@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException,Depends
 from models.farmer_model import EmailVerify,OTPVerify, Farmer, UpdateFarmer
 from passlib.context import CryptContext
 from datetime import datetime, timedelta
@@ -9,8 +9,12 @@ import smtplib
 import os
 import random
 
+<<<<<<< HEAD
 from utils.farmer_identity import generate_farmer_id
 
+=======
+from dependencies import get_current_user  # ← yeh add karo
+>>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
 
 
 
@@ -39,13 +43,6 @@ async def send_otp(data: EmailVerify):
                 status_code=400,
                 detail={"email": "Email already registered"}
             )
-        # existing_otp = await db.otps.find_one({"email": email})
-        # if existing_otp and datetime.utcnow() < existing_otp.get("resend_after", datetime.utcnow()):
-        #     raise HTTPException(
-        #         status_code=429,
-        #         detail="Wait before requesting another OTP"
-            
-        #     )
         otp = str(random.randint(100000, 999999))
         hashed_otp = pwd_context.hash(otp)
 
@@ -92,7 +89,6 @@ async def verify_otp(data: OTPVerify):
 
     return {"message": "OTP verified successfully"}
 
-
 @router.post("/signup")
 async def farmer_signup(data: Farmer):
 
@@ -100,106 +96,96 @@ async def farmer_signup(data: Farmer):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
+<<<<<<< HEAD
     hashed_password = pwd_context.hash(data.password[:72])
     farmer_id = data.farmer_id or generate_farmer_id()
 
     new_farmer = {
         "farmer_id": farmer_id,
         "fullname": data.fullname,  
+=======
+    new_farmer = {
+        "fullname": data.fullname,
+>>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
         "email": data.email,
         "phone": data.phone,
-        "password": hashed_password,
         "profilePicture": str(data.profilePicture) if data.profilePicture else None,
         "cropDetail": data.cropDetail.dict() if data.cropDetail else None,
         "type": "farmer",
-        "isBlocked": False, 
+        "isBlocked": False,
         "createdAt": datetime.utcnow(),
         "updatedAt": datetime.utcnow(),
     }
 
     result = await db.farmers.insert_one(new_farmer)
 
-    await db.otps.delete_one({"email": data.email})
-
     return {
+<<<<<<< HEAD
         "message": "Farmer account created successfully",
         "id": str(result.inserted_id),
         "farmer_id": farmer_id
+=======
+        "message": "Farmer created successfully",
+        "id": str(result.inserted_id)
+>>>>>>> e8cd478c136cda89584b1601fa73461b08cd7143
     }
-@router.get("/login/{email}")
-async def login(email: str):
-    print("Received email:", email)
-    user = await db.farmers.find_one({"email": email})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user["_id"] = str(user["_id"])
-    return {
-        "message": "Login success",
-        "user": user
-    }
-
-@router.get("/get-by-email/{email}")
-async def get_farmer_by_email(email: str):
-    """
-    Fetch farmer data using email.
-    Returns full farmer profile if found.
-    """
+@router.post("/login")
+async def login(user=Depends(get_current_user)):
+    email = user["email"]  # token se aata hai, URL se nahi
     farmer = await db.farmers.find_one({"email": email})
+    if not farmer:
+        raise HTTPException(status_code=404, detail="User not found")
+    if farmer.get("isBlocked"):
+        raise HTTPException(status_code=403, detail="Account is blocked")
+    farmer["_id"] = str(farmer["_id"])
+    if "password" in farmer:
+        del farmer["password"]
+    return {"message": "Login success", "user": farmer}
+
+@router.get("/me")
+async def get_me(user=Depends(get_current_user)):
+
+    email = user["email"]
+
+    farmer = await db.farmers.find_one({"email": email})
+
     if not farmer:
         raise HTTPException(status_code=404, detail="Farmer not found")
 
     if farmer.get("isBlocked"):
         raise HTTPException(status_code=403, detail="Account is blocked")
 
-    # Convert ObjectId to string for JSON serialization
     farmer["_id"] = str(farmer["_id"])
 
-    # Optional: remove sensitive info like password
     if "password" in farmer:
         del farmer["password"]
 
     return {
-        "message": "Farmer data fetched successfully",
+        "message": "Farmer fetched successfully",
         "farmer": farmer
     }
 
+@router.put("/update")
+async def update_farmer(data: UpdateFarmer, user=Depends(get_current_user)):
 
-@router.put("/update/{email}")
-async def update_farmer(email: str, data: UpdateFarmer):
-    existing_farmer = await db.farmers.find_one({"email": email})
-    if not existing_farmer:
-        raise HTTPException(status_code=404, detail="Farmer not found")
+    email = user["email"]
 
     update_data = {k: v for k, v in data.dict().items() if v is not None}
 
     if not update_data:
-        raise HTTPException(status_code=400, detail="No data provided for update")
-
-    if "profilePicture" in update_data:
-        update_data["profilePicture"] = str(update_data["profilePicture"])
-
+        raise HTTPException(status_code=400, detail="No data provided")
 
     update_data["updatedAt"] = datetime.utcnow()
 
-    result = await db.farmers.update_one(
+    await db.farmers.update_one(
         {"email": email},
         {"$set": update_data}
     )
 
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="No changes made")
+    farmer = await db.farmers.find_one({"email": email})
+    farmer["_id"] = str(farmer["_id"])
 
-    updated_farmer = await db.farmers.find_one({"email": email})
-    updated_farmer["_id"] = str(updated_farmer["_id"])
-
-    if "password" in updated_farmer:
-        del updated_farmer["password"]
-
-    return {
-        "message": "Farmer updated successfully",
-        "farmer": updated_farmer
-    }
-
+    return {"message": "Updated successfully", "farmer": farmer}
 @router.get("/all")
 async def get_all_farmers():
     farmers_cursor = db.farmers.find()

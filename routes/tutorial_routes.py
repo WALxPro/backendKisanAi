@@ -33,10 +33,43 @@ async def create_tutorial(tutorial: Tutorial):
         "id": str(result.inserted_id)
     }
 
+@router.get("/single/{tutorial_id}")
+async def get_single_tutorial(tutorial_id: str):
+
+    if not ObjectId.is_valid(tutorial_id):
+        raise HTTPException(status_code=400, detail="Invalid tutorial ID")
+
+    tutorial = await tutorials_collection.find_one(
+        {"_id": ObjectId(tutorial_id)}
+    )
+
+    if not tutorial:
+        raise HTTPException(status_code=404, detail="Tutorial not found")
+
+    tutorial["_id"] = str(tutorial["_id"])
+
+    if "created_at" in tutorial and isinstance(tutorial["created_at"], datetime):
+        tutorial["created_at"] = tutorial["created_at"].strftime("%d %b %Y")
+
+    return tutorial
 
 @router.get("/all")
 async def get_all_tutorials():
     tutorials = await tutorials_collection.find().sort("created_at", -1).to_list(100)
+
+    for t in tutorials:
+        t["_id"] = str(t["_id"])
+
+        if isinstance(t.get("created_at"), datetime):
+            t["created_at"] = t["created_at"].strftime("%d %b %Y")
+
+    return tutorials
+
+@router.get("/public")
+async def get_public_tutorials():
+    tutorials = await tutorials_collection.find(
+        {"status": "Published"}
+    ).sort("created_at", -1).to_list(length=100)
 
     for t in tutorials:
         t["_id"] = str(t["_id"])
