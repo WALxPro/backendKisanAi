@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+serviceAccountKey.json
+/cnn_model
+/cnn_model.zip
+cnn_model/
+*.keras
