@@ -11,11 +11,7 @@ class OTPVerify(BaseModel):
 
 
 class Farmer(BaseModel):
-<<<<<<< HEAD
-    farmer_id: Optional[str] = None
-=======
     uid: str
->>>>>>> 53c2c75 (chat issue resolve)
     fullname: str
     phone: str
     email: EmailStr

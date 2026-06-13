@@ -3,12 +3,7 @@ from __future__ import annotations
 from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-<<<<<<< HEAD
 
-async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -> dict[str, Any]:
-    farmer = await db.farmers.find_one({"farmer_id": farmer_id})
-    if not farmer:
-=======
 KAKU_DISEASE_CHAT_PROMPT = """
 You are KisanAI disease chat assistant for farmer {farmer_name}.
 This farmer is managed through admin {admin_name}.
@@ -32,27 +27,25 @@ Treatment: {treatment}
 Prevention: {prevention}
 
 Output language: {output_language}
-""".strip()  # FIX: keep all Kaku disease-chat behavior in one central prompt string.
+""".strip()
 
 
 async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -> dict[str, Any]:
-    # Try multiple lookup strategies because frontends may pass different id types:
-    # 1. `farmer_id` field (legacy)
-    # 2. `uid` field (Firebase UID)
-    # 3. `_id` (Mongo ObjectId string)
+    # Multiple lookup strategies — frontends may pass different id types:
+    # 1. farmer_id field (legacy)
+    # 2. uid field (Firebase UID)
+    # 3. _id (Mongo ObjectId string)
     farmer = await db.farmers.find_one({"farmer_id": farmer_id})
     if not farmer:
         farmer = await db.farmers.find_one({"uid": farmer_id})
     if not farmer:
         try:
             from bson import ObjectId
-
             farmer = await db.farmers.find_one({"_id": ObjectId(farmer_id)})
         except Exception:
             farmer = None
 
     if not farmer:
->>>>>>> 53c2c75 (chat issue resolve)
         raise RuntimeError("Farmer not found")
 
     admin = None
@@ -62,12 +55,8 @@ async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -
         admin = await db.admins.find_one({})
 
     farmer_name = farmer.get("fullname") or farmer.get("name") or "Farmer"
-<<<<<<< HEAD
-    crop_detail = farmer.get("cropDetail") or {}
-    crop_name = crop_detail.get("cropName") or crop_detail.get("crop_name") or "any crop"
-    location = crop_detail.get("city") or crop_detail.get("location") or "unknown location"
-=======
-    # Prefer top-level crop fields if frontend sends them, otherwise fall back to legacy `cropDetail`
+
+    # Top-level crop fields prefer karo, legacy cropDetail fallback
     crop_detail = farmer.get("crop_detail") or farmer.get("cropDetail") or {}
     crop_name = (
         farmer.get("crop_name")
@@ -83,7 +72,6 @@ async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -
         or crop_detail.get("location")
         or "unknown location"
     )
->>>>>>> 53c2c75 (chat issue resolve)
 
     admin_name = (admin or {}).get("name") or "Admin"
     admin_profile_picture = (admin or {}).get("profile_picture") or None
@@ -132,26 +120,13 @@ def build_disease_chat_system_prompt(context: dict[str, Any], disease_details: d
     farmer_name = context.get("farmer_name") or "Farmer"
     admin_name = context.get("admin_name") or "Admin"
     crop_name = context.get("crop_name") or "unknown crop"
-<<<<<<< HEAD
-=======
-    output_language = context.get("language") or "en"  # FIX: default Kaku replies to English when no language is provided.
->>>>>>> 53c2c75 (chat issue resolve)
+    output_language = context.get("language") or "en"
+
     description = disease_details.get("description", "")
     symptoms = ", ".join(disease_details.get("symptoms", []))
     treatment = ", ".join(disease_details.get("treatment", []))
     prevention = ", ".join(disease_details.get("prevention", []))
 
-<<<<<<< HEAD
-    return (
-        f"You are KisanAI disease chat assistant for farmer {farmer_name}. "
-        f"This farmer is managed through admin {admin_name}. "
-        f"The farmer's crop is {crop_name}. The detected disease is {disease_name}. "
-        "Answer only plant disease and crop-health questions. Use simple, practical words. "
-        "Avoid technical terms. Keep replies short and helpful. "
-        f"Disease information: {description}. Symptoms: {symptoms}. Treatment: {treatment}. Prevention: {prevention}. "
-        "If the question is outside plant disease guidance, respond with a short redirect to crop health topics."
-    )
-=======
     return KAKU_DISEASE_CHAT_PROMPT.format(
         farmer_name=farmer_name,
         admin_name=admin_name,
@@ -162,8 +137,7 @@ def build_disease_chat_system_prompt(context: dict[str, Any], disease_details: d
         treatment=treatment,
         prevention=prevention,
         output_language=output_language,
-    )  # FIX: changing KAKU_DISEASE_CHAT_PROMPT now changes Kaku behavior globally.
->>>>>>> 53c2c75 (chat issue resolve)
+    )
 
 
 def build_chat_messages(chat_history: list[dict]) -> list[HumanMessage | AIMessage | SystemMessage]:

@@ -2,11 +2,7 @@ from fastapi import APIRouter, HTTPException, Query
 from database import db
 from bson import ObjectId
 from models.disease_chat_model import DiseaseChatRequest
-<<<<<<< HEAD
 from utils.disease_chat import start_disease_chat, send_disease_chat_message
-=======
-from utils.disease_chat import CHAT_LIMIT_MESSAGE, start_disease_chat, send_disease_chat_message
->>>>>>> 53c2c75 (chat issue resolve)
 
 router = APIRouter()
 
@@ -82,9 +78,5 @@ async def get_chat_status(chat_id: str, farmer_id: str = Query(...)):
     except HTTPException:
         raise
     except Exception as e:
-<<<<<<< HEAD
         raise HTTPException(status_code=500, detail=f"Failed to get chat status: {str(e)}")
 
-=======
-        raise HTTPException(status_code=500, detail=f"Failed to get chat status: {str(e)}")
->>>>>>> 53c2c75 (chat issue resolve)

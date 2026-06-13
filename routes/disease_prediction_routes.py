@@ -5,8 +5,6 @@ from utils.leaf_detection import LeafValidationError
 
 router = APIRouter()
 
-<<<<<<< HEAD
-=======
 
 def _serialize_prediction(prediction: dict) -> dict:
     if prediction is None:
@@ -16,7 +14,6 @@ def _serialize_prediction(prediction: dict) -> dict:
         prediction["_id"] = str(prediction["_id"])
     return prediction
 
->>>>>>> 53c2c75 (chat issue resolve)
 
 @router.post("/predict")
 async def predict_disease(

@@ -9,13 +9,7 @@ import smtplib
 import os
 import random
 
-<<<<<<< HEAD
-from utils.farmer_identity import generate_farmer_id
-
-from dependencies import get_current_user  # ← yeh add karo
-=======
 from dependencies import get_current_user  
->>>>>>> 53c2c75 (chat issue resolve)
 
 
 load_dotenv()
@@ -101,28 +95,11 @@ async def farmer_signup(data: Farmer):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
 
-<<<<<<< HEAD
-
-    hashed_password = pwd_context.hash(data.password[:72])
-    farmer_id = data.farmer_id or generate_farmer_id()
-
- 
-    new_farmer = {
-        "farmer_id": farmer_id,
-        "fullname": data.fullname,
-        "email": data.email,
-        "phone": data.phone,
-        "profilePicture": str(data.profilePicture) if data.profilePicture else None,
-        "cropDetail": data.cropDetail.dict() if data.cropDetail else None,
-        "type": "farmer",
-        "isBlocked": False,
-=======
     # new_farmer = data.dict()
     # new_farmer["profilePicture"] = str(data.profilePicture) if data.profilePicture else None  # yeh line add karo
     new_farmer = data.dict()
     new_farmer["profilePicture"] = str(data.profilePicture) if data.profilePicture else None
     new_farmer.update({
->>>>>>> 53c2c75 (chat issue resolve)
         "createdAt": datetime.utcnow(),
         "updatedAt": datetime.utcnow(),
         "ai_scan_limit": 3,
@@ -132,31 +109,10 @@ async def farmer_signup(data: Farmer):
     result = await db.farmers.insert_one(new_farmer)
 
     return {
-<<<<<<< HEAD
-        "message": "Farmer account created successfully",
-        "id": str(result.inserted_id),
-        "farmer_id": farmer_id
-    }
-
-    
-@router.post("/login")
-async def login(user=Depends(get_current_user)):
-    email = user["email"]  # token se aata hai, URL se nahi
-    farmer = await db.farmers.find_one({"email": email})
-    if not farmer:
-        raise HTTPException(status_code=404, detail="User not found")
-    if farmer.get("isBlocked"):
-        raise HTTPException(status_code=403, detail="Account is blocked")
-    farmer["_id"] = str(farmer["_id"])
-    if "password" in farmer:
-        del farmer["password"]
-    return {"message": "Login success", "user": farmer}
-=======
         "success": True,
         "message": "Farmer created successfully",
         "id": str(result.inserted_id)
     }
->>>>>>> 53c2c75 (chat issue resolve)
 
 @router.get("/auth-user")
 async def get_me(user=Depends(get_current_user)):

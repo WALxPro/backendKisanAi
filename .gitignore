@@ -9,3 +9,5 @@ serviceAccountKey.json
 /cnn_model.zip
 cnn_model/
 *.keras
+venv/
+.venv/

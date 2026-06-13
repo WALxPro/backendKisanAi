@@ -11,13 +11,9 @@ class DiseaseMessage(BaseModel):
 
 class DiseaseChatRequest(BaseModel):
     prediction_id: str = Field(..., description="Disease prediction ID from /disease/predict")
-<<<<<<< HEAD
-    farmer_id: str = Field(..., description="Unique farmer ID")
-=======
     chat_id: str = Field(..., description="Disease chat session ID")  # FIX: keep chat session id separate from prediction id.
     farmer_id: str = Field(..., description="Firebase UID for the farmer")  # FIX: accept UID sent by mobile for ownership validation.
     language: str = Field(default="en", description="Kaku reply language, defaults to English")  # FIX: default Kaku answer language to English if mobile sends nothing.
->>>>>>> 53c2c75 (chat issue resolve)
     user_message: str = Field(..., min_length=1, description="User's question about the disease")
     
     @validator('user_message')
@@ -30,7 +26,7 @@ class DiseaseChatRequest(BaseModel):
 
 class DiseaseChatCreate(BaseModel):
     prediction_id: str
-    farmer_id: str
+    farmer_id: Optional[str] = None
     disease_name: str
     messages: List[DiseaseMessage] = Field(default_factory=list)
     chat_count: int = 0  # Number of times user has chatted (max 3)
