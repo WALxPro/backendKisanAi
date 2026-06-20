@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from pymongo.errors import DuplicateKeyError
 from bson import ObjectId
 
-from utils.tools import get_farm_context, build_disease_chat_system_prompt
-
+from utils.tools import (
+    get_farm_context,
+    build_disease_chat_system_prompt,
+    build_crop_assistant_system_prompt,
+    build_chat_messages,
+)
 load_dotenv()
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -25,10 +30,7 @@ try:
 except Exception:
     GEMINI_LLM = None
 
-MAX_CHATS = 3
-MAX_WORDS = 50
-CHAT_LIMIT_MESSAGE = "Chat limit reached. Try after 2 minutes"
-WINDOW_MINUTES = 2
+MAX_WORDS = 50  # per-message word limit stays (keeps messages short/cheap) — chat count limit removed
 
 
 def count_words(text: str) -> int:
@@ -37,6 +39,25 @@ def count_words(text: str) -> int:
 
 def validate_message_length(message: str) -> bool:
     return count_words(message) <= MAX_WORDS
+
+
+def extract_general_answer(response_text: str) -> str:
+    cleaned = response_text.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+        cleaned = cleaned.strip()
+
+    try:
+        parsed = json.loads(cleaned)
+    except Exception:
+        return response_text
+
+    if isinstance(parsed, dict):
+        return str(parsed.get("answer") or response_text)
+
+    return response_text
 
 
 async def start_disease_chat(prediction_id: str, farmer_id: str, db) -> dict:
@@ -52,16 +73,15 @@ async def start_disease_chat(prediction_id: str, farmer_id: str, db) -> dict:
     farm_context = await get_farm_context(db=db, farmer_id=farmer_id)
 
     chat_record = {
+        "chat_mode": "disease",
+        "chat_type": "disease",
         "prediction_id": prediction_id,
         "farmer_id": farmer_id,
         "disease_name": prediction.get("predicted_class"),
         "disease_details": prediction.get("disease_details", {}),
         "farmer_name": farm_context.get("farmer_name"),
-        "admin_name": farm_context.get("admin_name"),
         "messages": [],
         "chat_count": 0,
-        "window_started_at": None,
-        "window_expires_at": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -84,94 +104,113 @@ async def start_disease_chat(prediction_id: str, farmer_id: str, db) -> dict:
     if not chat:
         raise RuntimeError("Failed to load chat session")
 
-    chat_count = chat.get("chat_count", 0)
-    window_expires_at = chat.get("window_expires_at")
+    return {
+        "chat_id": str(chat["_id"]),
+        "chat_mode": "disease",
+        "chat_count": chat.get("chat_count", 0),
+        "messages": chat.get("messages", []),
+        "can_continue": True,  # no limit — chat never locks
+        "existing_chat": existing_chat,
+        "message": "Existing chat loaded" if existing_chat else "Chat session started",
+    }
 
-    # 2 min window expired → reset count → 3 fresh messages
-    if chat_count >= MAX_CHATS and (not window_expires_at or now >= window_expires_at):
-        await db.disease_chats.update_one(
-            {"_id": chat["_id"]},
-            {"$set": {
-                "chat_count": 0,
-                "window_started_at": None,
-                "window_expires_at": None,
-                "updated_at": now,
-            }}
+async def start_general_chat(farmer_id: str, db) -> dict:
+    now = datetime.utcnow()
+    farm_context = await get_farm_context(db=db, farmer_id=farmer_id)
+
+    chat_record = {
+        "chat_mode": "general",
+        "chat_type": "general",
+        "farmer_id": farmer_id,
+        "disease_name": None,
+        "disease_details": {},
+        "farmer_name": farm_context.get("farmer_name"),
+        "messages": [],
+        "chat_count": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    query = {"chat_mode": "general", "farmer_id": farmer_id}
+    existing_chat = False
+
+    try:
+        result = await db.disease_chats.update_one(
+            query,
+            {"$setOnInsert": chat_record},
+            upsert=True,
         )
-        chat_count = 0
-        window_expires_at = None
+        existing_chat = result.matched_count > 0
+    except DuplicateKeyError:
+        existing_chat = True
 
-    remaining_chats = MAX_CHATS - chat_count
+    chat = await db.disease_chats.find_one(query)
+
+    if not chat:
+        raise RuntimeError("Failed to load general chat session")
 
     return {
         "chat_id": str(chat["_id"]),
-        "chat_count": chat_count,
-        "remaining_chats": remaining_chats,
+        "chat_mode": "general",
+        "chat_count": chat.get("chat_count", 0),
         "messages": chat.get("messages", []),
-        "can_continue": remaining_chats > 0,
+        "can_continue": True,
         "existing_chat": existing_chat,
-        "message": "Existing chat loaded" if existing_chat else "Chat session started",
-        "window_expires_at": window_expires_at,
+        "message": "Existing general chat loaded" if existing_chat else "General chat session started",
     }
-
-
 async def send_disease_chat_message(request, db) -> dict:
     if not validate_message_length(request.user_message):
         raise ValueError("Message exceeds word limit")
 
     now = datetime.utcnow()
 
-    chat = await db.disease_chats.find_one({
+    chat_mode = getattr(request, "chat_mode", None) or getattr(request, "chat_type", None) or "disease"
+
+    chat_query = {
         "_id": ObjectId(request.chat_id),
-        "prediction_id": request.prediction_id,
         "farmer_id": request.farmer_id,
-    })
+    }
+
+    if chat_mode == "general":
+        chat_query["chat_mode"] = "general"
+    else:
+        chat_query["prediction_id"] = request.prediction_id
+
+    chat = await db.disease_chats.find_one(chat_query)
 
     if not chat:
         raise RuntimeError("Chat session not found")
 
-    chat_count = chat.get("chat_count", 0)
-    window_expires_at = chat.get("window_expires_at")
-    window_started_at = chat.get("window_started_at") or now
-
-    # Window expired ya kabhi shuru nahi hui → reset
-    if not window_expires_at or now >= window_expires_at:
-        window_started_at = now
-        window_expires_at = now + timedelta(minutes=WINDOW_MINUTES)
-        chat_count = 0
-
-        await db.disease_chats.update_one(
-            {"_id": chat["_id"]},
-            {"$set": {
-                "chat_count": 0,
-                "window_started_at": window_started_at,
-                "window_expires_at": window_expires_at,
-                "updated_at": now,
-            }}
-        )
-
-    if chat_count >= MAX_CHATS:
-        raise RuntimeError(CHAT_LIMIT_MESSAGE)
-
     if GEMINI_LLM is None:
         raise RuntimeError("AI assistant is not available. Please configure GEMINI_API_KEY.")
 
-    disease_name = chat.get("disease_name")
-    disease_details = chat.get("disease_details", {})
-
     farm_context = await get_farm_context(db=db, farmer_id=request.farmer_id)
-    farm_context["disease_name"] = disease_name
     farm_context["language"] = request.language or "en"
 
-    system_prompt = build_disease_chat_system_prompt(farm_context, disease_details)
+    if chat_mode == "general":
+        system_prompt = build_crop_assistant_system_prompt(
+            farm_context,
+            request.language or "en",
+        )
+        messages = [SystemMessage(content=system_prompt)]
+        messages.extend(build_chat_messages(chat.get("messages", [])))
+        messages.append(HumanMessage(content=request.user_message))
+    else:
+        disease_name = chat.get("disease_name")
+        disease_details = chat.get("disease_details", {})
+        farm_context["disease_name"] = disease_name
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=request.user_message),
-    ]
+        system_prompt = build_disease_chat_system_prompt(farm_context, disease_details)
+
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=request.user_message),
+        ]
 
     response = GEMINI_LLM.invoke(messages)
     ai_response = response.content if hasattr(response, "content") else str(response)
+    if chat_mode == "general":
+        ai_response = extract_general_answer(ai_response)
 
     new_messages = [
         {"role": "user", "content": request.user_message, "created_at": now},
@@ -179,12 +218,7 @@ async def send_disease_chat_message(request, db) -> dict:
     ]
 
     updated_chat = await db.disease_chats.find_one_and_update(
-        {
-            "_id": ObjectId(request.chat_id),
-            "prediction_id": request.prediction_id,
-            "farmer_id": request.farmer_id,
-            "chat_count": {"$lt": MAX_CHATS},  # race condition se bachao
-        },
+        chat_query,
         {
             "$push": {"messages": {"$each": new_messages}},
             "$inc": {"chat_count": 1},
@@ -194,18 +228,14 @@ async def send_disease_chat_message(request, db) -> dict:
     )
 
     if not updated_chat:
-        raise RuntimeError(CHAT_LIMIT_MESSAGE)
-
-    new_chat_count = updated_chat.get("chat_count", 1)
-    remaining_chats = MAX_CHATS - new_chat_count
+        raise RuntimeError("Failed to update chat session")
 
     return {
         "chat_id": str(updated_chat["_id"]),
-        "chat_count": new_chat_count,
-        "remaining_chats": remaining_chats,
+        "chat_mode": chat_mode,
+        "chat_count": updated_chat.get("chat_count", 1),
         "user_message": request.user_message,
         "ai_response": ai_response,
-        "can_continue": remaining_chats > 0,
-        "window_expires_at": updated_chat.get("window_expires_at"),
-        "message": f"Response sent. You have {remaining_chats} chat(s) remaining.",
+        "can_continue": True,  # no limit
+        "message": "Response sent.",
     }

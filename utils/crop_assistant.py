@@ -59,7 +59,6 @@ async def handle_crop_chat(payload, db) -> dict:
     farm_context = await get_farm_context(
         db=db,
         farmer_id=payload.farmer_id,
-        admin_email=getattr(payload, "admin_email", None),
     )
     system_prompt = build_crop_assistant_system_prompt(farm_context, payload.language)
     messages = [SystemMessage(content=system_prompt)]

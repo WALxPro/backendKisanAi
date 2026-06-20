@@ -21,7 +21,6 @@ class CropChatRequest(BaseModel):
     crop_name: str | None = None
     location: str | None = None
     language: str | None = "en"
-    admin_email: str | None = None
     chat_history: list[ChatMessage] = Field(default_factory=list)
 
 

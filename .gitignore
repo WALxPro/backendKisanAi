@@ -11,3 +11,4 @@ cnn_model/
 *.keras
 venv/
 .venv/
+.venv313/

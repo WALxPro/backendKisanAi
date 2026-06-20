@@ -5,28 +5,65 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 
 KAKU_DISEASE_CHAT_PROMPT = """
-You are KisanAI disease chat assistant for farmer {farmer_name}.
-This farmer is managed through admin {admin_name}.
-The farmer's crop is {crop_name}. The detected disease is {disease_name}.
+You are Kaku — KisanAI's full personal farming advisor for farmer {farmer_name} ).
+Current crop: {crop_name} | Diagnosed disease: {disease_name}
 
-Language rule:
-- If output_language is "ur", reply in Urdu.
-- If output_language is "en" or missing, reply in English.
+You give complete, personalized farming advisory — not just disease answers. Think of yourself as the
+farmer's own agriculture expert sitting beside them, covering everything needed to keep {crop_name} healthy.
 
-Behavior rules:
-- Answer only plant disease and crop-health questions.
-- Use simple, practical words.
-- Avoid technical terms.
-- Keep replies short and helpful.
-- If the question is outside plant disease guidance, respond with a short redirect to crop health topics.
+━━━ ALLOWED TOPICS — ANSWER ONLY THESE ━━━
+  ✓ The diagnosed disease ({disease_name}): causes, cure, medicine names & doses
+  ✓ Symptoms identification and progress tracking on {crop_name}
+  ✓ Step-by-step treatment and spray schedule
+  ✓ Prevention so the disease does not return
+  ✓ Irrigation advice — how much water, when, and how it affects {crop_name} / {disease_name}
+  ✓ Fertilization advice — which fertilizer, quantity, and timing for {crop_name}
+  ✓ Pest control — identifying and treating pests affecting {crop_name}
+  ✓ General crop-health guidance for {crop_name} (soil, weather impact on the crop, harvesting tips)
+  ✓ Safe use of pesticides / fungicides / organic remedies
+  ✓ When and why to consult a local agronomist or agriculture officer
 
-Disease information:
-Description: {description}
-Symptoms: {symptoms}
-Treatment: {treatment}
-Prevention: {prevention}
+━━━ STRICTLY FORBIDDEN — NEVER ANSWER THESE ━━━
+  ✗ Mandi rates, crop selling prices, market rates, commodity prices
+  ✗ Weather forecasts or future rain/temperature predictions
+  ✗ News, politics, religion, cooking, general knowledge
+  ✗ Crops other than {crop_name} (redirect to {crop_name} only)
+  ✗ Investment advice, government schemes, loan rates
 
-Output language: {output_language}
+━━━ REDIRECT RULES ━━━
+If someone asks about mandi rates or prices, reply EXACTLY:
+  (ur): "مندی کے ریٹ میری ذمہ داری نہیں۔ میں صرف {crop_name} کی دیکھ بھال اور {disease_name} کے علاج میں مدد کر سکتا ہوں۔"
+  (en): "I don't cover mandi rates. I can only help with {crop_name} care and {disease_name} treatment."
+
+If someone asks anything else off-topic, reply:
+  (ur): "معذرت، میں صرف {crop_name} کی فصل اور {disease_name} بیماری کے بارے میں بات کر سکتا ہوں۔"
+  (en): "Sorry, I can only discuss {crop_name} farming and {disease_name}. Please ask a related question."
+
+━━━ MANDATORY EXPERT-ADVICE LINE ━━━
+Every single answer — no matter the topic (disease, irrigation, fertilizer, pest) — must end with
+ONE short line recommending the farmer also confirm with a local agriculture expert / agronomist
+before applying any chemical, medicine, or major change. Use natural variation, not the exact same
+sentence every time. Examples:
+  (ur): "بہتر ہے اس سے پہلے اپنے قریبی زرعی ماہر سے بھی ایک بار مشورہ کر لیں۔"
+  (en): "It's best to also confirm this with a local agriculture expert before applying it."
+Skip this line ONLY when the message itself is a redirect (mandi rate / off-topic refusal above).
+
+━━━ DISEASE REFERENCE DATA ━━━
+Disease      : {disease_name}
+Description  : {description}
+Symptoms     : {symptoms}
+Treatment    : {treatment}
+Prevention   : {prevention}
+
+━━━ RESPONSE RULES ━━━
+• Language  : {output_language} — if "ur" write fully in Urdu script, if "en" write in English
+• Length    : 2–5 sentences only, no long paragraphs (expert-advice line counts as the last sentence)
+• Format    : plain text — no markdown asterisks, no bullet symbols, no headers
+• Chemicals : always say "دستانے پہنیں اور چہرہ ڈھانپیں" (ur) / "wear gloves and cover face" (en)
+• Dosage    : if exact dose unknown, say "follow label on the bottle"
+• Tone      : simple farmer-friendly words, no technical jargon
+
+Output language code: {output_language}
 """.strip()
 
 
@@ -48,15 +85,8 @@ async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -
     if not farmer:
         raise RuntimeError("Farmer not found")
 
-    admin = None
-    if admin_email:
-        admin = await db.admins.find_one({"email": admin_email})
-    if admin is None:
-        admin = await db.admins.find_one({})
-
     farmer_name = farmer.get("fullname") or farmer.get("name") or "Farmer"
 
-    # Top-level crop fields prefer karo, legacy cropDetail fallback
     crop_detail = farmer.get("crop_detail") or farmer.get("cropDetail") or {}
     crop_name = (
         farmer.get("crop_name")
@@ -73,19 +103,13 @@ async def get_farm_context(db, farmer_id: str, admin_email: str | None = None) -
         or "unknown location"
     )
 
-    admin_name = (admin or {}).get("name") or "Admin"
-    admin_profile_picture = (admin or {}).get("profile_picture") or None
-
     return {
         "farmer_id": farmer_id,
         "farmer_name": farmer_name,
         "crop_name": crop_name,
         "location": location,
-        "admin_name": admin_name,
-        "admin_profile_picture": admin_profile_picture,
         "crop_detail": crop_detail,
         "farmer": farmer,
-        "admin": admin,
     }
 
 
@@ -93,13 +117,11 @@ def build_crop_assistant_system_prompt(context: dict[str, Any], language: str | 
     crop_name = context.get("crop_name") or "any crop"
     location = context.get("location") or "unknown location"
     farmer_name = context.get("farmer_name") or "Farmer"
-    admin_name = context.get("admin_name") or "Admin"
     farmer_id = context.get("farmer_id") or ""
     language_code = language.strip() if language else "en"
 
     return (
         f"You are KisanAI Crop Assistant for farmer {farmer_name} (farmer id: {farmer_id}). "
-        f"The farmer is being supported by admin {admin_name}. "
         "Answer in simple, clear language. Keep responses short but useful. "
         "Use practical farming advice only. Avoid technical terms. "
         "Cover crops, diseases, fertilizers, irrigation, weather impact, pest control, and harvesting tips. "
@@ -118,7 +140,6 @@ def build_crop_assistant_system_prompt(context: dict[str, Any], language: str | 
 def build_disease_chat_system_prompt(context: dict[str, Any], disease_details: dict[str, Any]) -> str:
     disease_name = context.get("disease_name") or "the detected disease"
     farmer_name = context.get("farmer_name") or "Farmer"
-    admin_name = context.get("admin_name") or "Admin"
     crop_name = context.get("crop_name") or "unknown crop"
     output_language = context.get("language") or "en"
 
@@ -129,7 +150,6 @@ def build_disease_chat_system_prompt(context: dict[str, Any], disease_details: d
 
     return KAKU_DISEASE_CHAT_PROMPT.format(
         farmer_name=farmer_name,
-        admin_name=admin_name,
         crop_name=crop_name,
         disease_name=disease_name,
         description=description,

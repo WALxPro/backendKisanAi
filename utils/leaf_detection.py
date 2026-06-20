@@ -1,122 +1,133 @@
 from __future__ import annotations
 
-from pathlib import Path
+import base64
+import itertools
+import os
 
-import numpy as np
-import tensorflow as tf
+from dotenv import load_dotenv
+import google.generativeai as genai
 
-from utils.image_preprocessing import preprocess_image_bytes
+load_dotenv()
 
-ROOT = Path(__file__).resolve().parents[1]
-CNN_MODEL_DIR = ROOT / "cnn_model"
-LEAF_IMAGE_SIZE = 224
+# ── Paid Gemini API key ───────────────────────────────────────────────────────
+_RAW_KEYS: list[str] = [
+    k for k in [
+        os.getenv("GEMINI_PAID"),  # paid key
+    ]
+    if k and k.strip()
+]
+
+print(f"[leaf] Loaded {len(_RAW_KEYS)} Gemini API key(s)")
+
+_KEY_CYCLE = itertools.cycle(_RAW_KEYS) if _RAW_KEYS else None
+
+GEMINI_LEAF_MODEL = "gemini-2.5-flash-lite"
+
+VALID_CLASSES = {
+    "BlackPoint",
+    "FusariumFootRot",
+    "HealthyLeaf",
+    "LeafBlight",
+    "WheatBlast",
+}
 
 
-def _resolve_cnn_model_file(filename: str) -> Path:
-    """cnn_model/ folder ke andar file dhundo — flat ya nested dono support."""
-    direct = CNN_MODEL_DIR / filename
-    nested = CNN_MODEL_DIR / "cnn_model" / filename
-    if direct.exists():
-        return direct
-    if nested.exists():
-        return nested
-    raise FileNotFoundError(
-        f"Model file nahi mili:\n  {direct}\n  {nested}"
-    )
-
-
-LEAF_MODEL_PATH = _resolve_cnn_model_file("leaf_vs_non_leaf_model.keras")
+def _next_key() -> str | None:
+    return next(_KEY_CYCLE) if _KEY_CYCLE else None
 
 
 class LeafValidationError(ValueError):
-    """Raise hoti hai jab image mein leaf nahi hoti."""
     pass
 
 
-def _load_leaf_model() -> tf.keras.Model:
-    if not LEAF_MODEL_PATH.exists():
-        raise RuntimeError(f"Leaf model nahi mila: {LEAF_MODEL_PATH}")
-    return tf.keras.models.load_model(str(LEAF_MODEL_PATH), compile=False)
-
-
-# ✅ Module load hote waqt ek baar load — disease model jaisi pattern
-LEAF_MODEL = _load_leaf_model()
-
-
 def predict_leaf(image_bytes: bytes, threshold: float = 0.5) -> dict[str, object]:
-    """
-    Check karo ke image mein leaf hai ya nahi.
-
-    Args:
-        image_bytes : Raw image bytes (mobile se aai hui photo)
-        threshold   : Is se kam confidence = not a leaf (default 0.5)
-
-    Returns:
-        {
-            "is_leaf"    : bool,
-            "confidence" : float (0.0 – 1.0),
-            "message"    : str
+    if not _RAW_KEYS:
+        print("[leaf] ⚠️  No API key found — skipping validation")
+        return {
+            "is_leaf": True,
+            "confidence": 1.0,
+            "detected_class": None,
+            "message": "Gemini API key not configured, skipping validation.",
         }
-    """
-    image_array = preprocess_image_bytes(
-        image_bytes,
-        (LEAF_IMAGE_SIZE, LEAF_IMAGE_SIZE),
-        debug_label="leaf",
-        expected_batch_shape=(1, LEAF_IMAGE_SIZE, LEAF_IMAGE_SIZE, 3),
-        normalize=True,
-    )
 
-    print(f"[leaf] model input shape : {LEAF_MODEL.input_shape}")
-    print(f"[leaf] tensor shape      : {image_array.shape}")
+    image_data = base64.b64encode(image_bytes).decode("utf-8")
 
-    # ✅ Ek hi predict call — clear_session() nahi (shared TF graph kharab hoti hai)
-    raw_prediction = LEAF_MODEL.predict(image_array, verbose=0)
-    prediction_output = np.asarray(raw_prediction[0], dtype=np.float32)
+    prompt = """You are a wheat disease detection assistant.
 
-    # Model output ke teeno cases handle karo
-    if prediction_output.ndim == 0:
-        # Binary sigmoid — single scalar
-        confidence = float(prediction_output)
-        is_leaf = confidence >= threshold
+Look at this image carefully and classify it into EXACTLY one of these 5 categories:
 
-    else:
-        prediction_flat = prediction_output.flatten()
+1. BlackPoint       - Wheat grain with dark/black discoloration at tip
+2. FusariumFootRot  - Wheat stem/root with brown rot at base
+3. HealthyLeaf      - Normal green healthy wheat leaf or plant
+4. LeafBlight       - Wheat leaf with yellow/brown blight spots or lesions
+5. WheatBlast       - Wheat spike/head with bleached appearance
 
-        if len(prediction_flat) == 1:
-            # Single value array — binary sigmoid
-            confidence = float(prediction_flat[0])
-            is_leaf = confidence >= threshold
-        else:
-            # Multi-class — class 0 = leaf, class 1 = non_leaf
-            class_index = int(np.argmax(prediction_flat))
-            confidence = float(prediction_flat[class_index])
-            is_leaf = class_index == 0
+If the image does NOT show wheat at all (animal, human, car, other crop, random object, other plant disease not in this list) — reply: INVALID
 
+Reply with ONLY one word from this list:
+BlackPoint | FusariumFootRot | HealthyLeaf | LeafBlight | WheatBlast | INVALID
+
+No explanation. One word only."""
+
+    # Try the key (only one key now, so this loop runs once)
+    for attempt in range(len(_RAW_KEYS)):
+        api_key = _next_key()
+        key_hint = f"...{api_key[-6:]}" if api_key else "None"
+        print(f"[leaf] Attempt {attempt + 1}/{len(_RAW_KEYS)} using key {key_hint}")
+
+        try:
+            genai.configure(api_key=api_key)
+            model = genai.GenerativeModel(GEMINI_LEAF_MODEL)
+
+            response = model.generate_content([
+                {"mime_type": "image/jpeg", "data": image_data},
+                prompt,
+            ])
+
+            answer = response.text.strip()
+            answer = answer.split()[0] if answer.split() else "INVALID"
+            print(f"[leaf] ✅ Gemini response: {answer}")
+
+            if answer in VALID_CLASSES:
+                return {
+                    "is_leaf": True,
+                    "confidence": 1.0,
+                    "detected_class": answer,
+                    "message": f"Wheat image detected ✅ ({answer})",
+                }
+            else:
+                return {
+                    "is_leaf": False,
+                    "confidence": 0.0,
+                    "detected_class": None,
+                    "message": "Invalid image! Please upload a wheat plant image only. (BlackPoint, FusariumFootRot, HealthyLeaf, LeafBlight, or WheatBlast)",
+                }
+
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "quota" in err_str.lower():
+                print(f"[leaf] ⚠️  Key {key_hint} quota exceeded.")
+                continue
+            else:
+                print(f"[leaf] ❌ Gemini error: {e}")
+                return {
+                    "is_leaf": False,
+                    "confidence": 0.0,
+                    "detected_class": None,
+                    "message": "Service temporarily unavailable. Please try again later.",
+                }
+
+    # Key quota khatam
+    print("[leaf] ❌ API key quota exceeded!")
     return {
-        "is_leaf": is_leaf,
-        "confidence": confidence,
-        "message": (
-            "Image mein leaf hai ✅"
-            if is_leaf else
-            "❌ Yeh leaf nahi hai. Please wheat patti ki photo bhejein."
-        ),
+        "is_leaf": False,
+        "confidence": 0.0,
+        "detected_class": None,
+        "message": "Validation service quota exceeded. Please try again later.",
     }
 
 
 def assert_leaf(image_bytes: bytes, threshold: float = 0.5) -> dict[str, object]:
-    """
-    Leaf honi chahiye — nahi hai toh LeafValidationError raise karo.
-
-    Args:
-        image_bytes : Raw image bytes
-        threshold   : Confidence threshold
-
-    Returns:
-        predict_leaf() ka result (agar leaf hai)
-
-    Raises:
-        LeafValidationError: Agar leaf nahi hai
-    """
     result = predict_leaf(image_bytes=image_bytes, threshold=threshold)
     if not result["is_leaf"]:
         raise LeafValidationError(result["message"])

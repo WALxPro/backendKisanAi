@@ -21,6 +21,7 @@ async def predict_disease(
     farmer_id: str = Form(...),
     user_email: str | None = Form(default=None),
     image_name: str | None = Form(default=None),
+    language: str = Form(default="en"),
     
 ):
     try:
@@ -35,6 +36,7 @@ async def predict_disease(
             user_email=user_email,
             image_name=image_name or image.filename,
             db=db,
+            language=language,  
         )
 
         return result
