@@ -50,3 +50,4 @@ async def test_db():
 @app.get("/")
 def root():
     return {"status": "Admin Backend Running"}
+

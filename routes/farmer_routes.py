@@ -226,97 +226,111 @@ async def farmer_signup(data: Farmer):
         )
 
 
-@router.get("/auth-user")
-async def get_me(user=Depends(get_current_user)):
-    try:
-        uid = user["uid"]
+# @router.get("/auth-user")
+# async def get_me(user=Depends(get_current_user)):
+#     try:
+#         uid = user["uid"]
 
-        farmer = await db.farmers.find_one({"uid": uid})
+#         farmer = await db.farmers.find_one({"uid": uid})
 
-        if not farmer:
-            return error_response(
-                message="Farmer profile not found",
-                detail="Farmer profile not found",
-                status_code=404
-            )
+#         if not farmer:
+#             return error_response(
+#                 message="Farmer profile not found",
+#                 detail="Farmer profile not found",
+#                 status_code=404
+#             )
 
-        if farmer.get("isBlocked"):
-            return error_response(
-                message="Account is blocked",
-                detail="Account is blocked",
-                status_code=403
-            )
+#         if farmer.get("isBlocked"):
+#             return error_response(
+#                 message="Account is blocked",
+#                 detail="Account is blocked",
+#                 status_code=403
+#             )
         
-        farmer["_id"] = str(farmer["_id"])
-        farmer.pop("password", None)
+#         farmer["_id"] = str(farmer["_id"])
+#         farmer.pop("password", None)
 
-        farmer = jsonable_encoder(farmer)
+#         farmer = jsonable_encoder(farmer)
 
-        return success_response(
+#         return success_response(
+#         message="Farmer fetched successfully",
+#         detail={"farmer": farmer},
+#         status_code=200
+# )
+
+
+
+#     except Exception as e:
+#         return error_response(
+#             message="Failed to fetch farmer",
+#             detail={"general": str(e)},
+#             status_code=500
+#         )
+
+@router.get("/auth-user")
+async def get_me(email: str):
+    farmer = await db.farmers.find_one({"email": email})
+
+    if not farmer:
+        return error_response(
+            message="Farmer not found",
+            detail="Farmer not found",
+            status_code=404
+        )
+
+    if farmer.get("isBlocked"):
+        return error_response(
+            message="Account is blocked",
+            detail="Account is blocked",
+            status_code=403
+        )
+
+    farmer["_id"] = str(farmer["_id"])
+    farmer.pop("password", None)
+    farmer = jsonable_encoder(farmer)
+
+    return success_response(
         message="Farmer fetched successfully",
         detail={"farmer": farmer},
         status_code=200
-)
-
-
-
-    except Exception as e:
-        return error_response(
-            message="Failed to fetch farmer",
-            detail={"general": str(e)},
-            status_code=500
-        )
-
+    )
 
 @router.put("/update")
-async def update_farmer(data: UpdateFarmer, user=Depends(get_current_user)):
-    try:
-        uid = user["uid"]
+async def update_farmer(email: str, data: UpdateFarmer):
+    farmer = await db.farmers.find_one({"email": email})
 
-        update_data = data.dict(exclude_none=True)
-
-        if update_data.get("profilePicture"):
-            update_data["profilePicture"] = str(update_data["profilePicture"])
-
-        if not update_data:
-            return error_response(
-                message="No data provided",
-                detail="No data provided",
-                status_code=400
-            )
-
-        update_data["updatedAt"] = datetime.utcnow()
-
-        await db.farmers.update_one(
-            {"uid": uid},
-            {"$set": update_data}
-        )
-
-        farmer = await db.farmers.find_one({"uid": uid})
-
-        if not farmer:
-            return error_response(
-                message="Farmer not found",
-                detail="Farmer not found",
-                status_code=404
-            )
-
-        farmer["_id"] = str(farmer["_id"])
-        farmer.pop("password", None)
-
-        return success_response(
-            message="Updated successfully",
-            detail={"farmer": farmer},
-            status_code=200
-        )
-
-    except Exception as e:
+    if not farmer:
         return error_response(
-            message="Failed to update farmer",
-            detail={"general": str(e)},
-            status_code=500
+            message="Farmer not found",
+            detail="Farmer not found",
+            status_code=404
         )
 
+    update_data = data.dict(exclude_none=True)
+
+    if not update_data:
+        return error_response(
+            message="No data provided",
+            detail="No data provided",
+            status_code=400
+        )
+
+    update_data["updatedAt"] = datetime.utcnow()
+
+    await db.farmers.update_one(
+        {"email": email},
+        {"$set": update_data}
+    )
+
+    updated = await db.farmers.find_one({"email": email})
+    updated["_id"] = str(updated["_id"])
+    farmer = jsonable_encoder(farmer)
+
+    return success_response(
+        message="Updated successfully",
+        detail={"farmer": updated},
+        status_code=200
+    )
 
 @router.get("/all")
 async def get_all_farmers():
