@@ -315,6 +315,9 @@ async def update_farmer(email: str, data: UpdateFarmer):
             status_code=400
         )
 
+    # 🔥 FIX: HttpUrl aur dusre non-BSON types ko safe types mein convert karen
+    update_data = jsonable_encoder(update_data)
+
     update_data["updatedAt"] = datetime.utcnow()
 
     await db.farmers.update_one(
@@ -323,8 +326,16 @@ async def update_farmer(email: str, data: UpdateFarmer):
     )
 
     updated = await db.farmers.find_one({"email": email})
+
+    if not updated:
+        return error_response(
+            message="Update failed",
+            detail="Update failed",
+            status_code=500
+        )
+
     updated["_id"] = str(updated["_id"])
-    farmer = jsonable_encoder(farmer)
+    updated = jsonable_encoder(updated)
 
     return success_response(
         message="Updated successfully",
