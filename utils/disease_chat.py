@@ -59,7 +59,6 @@ def extract_general_answer(response_text: str) -> str:
 
     return response_text
 
-
 async def start_disease_chat(prediction_id: str, farmer_id: str, db) -> dict:
     prediction = await db.disease_predictions.find_one({"_id": ObjectId(prediction_id)})
 
@@ -158,6 +157,7 @@ async def start_general_chat(farmer_id: str, db) -> dict:
         "existing_chat": existing_chat,
         "message": "Existing general chat loaded" if existing_chat else "General chat session started",
     }
+
 async def send_disease_chat_message(request, db) -> dict:
     if not validate_message_length(request.user_message):
         raise ValueError("Message exceeds word limit")
